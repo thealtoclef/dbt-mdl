@@ -28,7 +28,11 @@ input = "wren-mdl/mdl.schema.json"
 input-file-type = "jsonschema"
 output = "src/wren_dbt_converter/models/mdl.py"
 output-model-type = "pydantic_v2.BaseModel"
+snake-case-field = "true"
+use-type-alias = true
 formatters = ["ruff-check", "ruff-format"]
+target-python-version = "3.14"
+disable-timestamp = true
 
 [tool.pytest]
 testpaths = ["tests"]
