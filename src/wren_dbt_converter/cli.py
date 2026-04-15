@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from . import build_manifest
+from .models.wrapper import manifest_to_dict
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -82,7 +83,7 @@ def main(argv: list[str] | None = None) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     mdl_path = output_dir / "mdl.json"
-    mdl_path.write_text(json.dumps(result.manifest.to_camel_dict(), indent=2))
+    mdl_path.write_text(json.dumps(manifest_to_dict(result.manifest), indent=2))
 
     connection_path = output_dir / "connection.json"
     connection_path.write_text(

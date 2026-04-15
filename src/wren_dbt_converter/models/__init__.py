@@ -1,11 +1,14 @@
-from .wren_mdl import (
+from .wrapper import (
     EnumDefinition,
     EnumValue,
     TableReference,
     WrenColumn,
     WrenModel,
-    Relationship,
     WrenMDLManifest,
+    Relationship,
+    JoinType,
+    manifest_to_dict,
+    manifest_to_base64,
 )
 from .data_source import (
     WrenDataSource,
@@ -22,8 +25,11 @@ __all__ = [
     "TableReference",
     "WrenColumn",
     "WrenModel",
-    "Relationship",
     "WrenMDLManifest",
+    "Relationship",
+    "JoinType",
+    "manifest_to_dict",
+    "manifest_to_base64",
     "WrenDataSource",
     "map_dbt_type_to_wren",
     "build_connection_info",

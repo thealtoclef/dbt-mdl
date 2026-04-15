@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 
 from wren_dbt_converter import build_manifest, ConvertResult
-from wren_dbt_converter.models.wren_mdl import WrenMDLManifest
+from wren_dbt_converter.models.wrapper import WrenMDLManifest
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -58,7 +58,8 @@ def test_build_manifest_has_relationship(dbt_project):
     result = build_manifest(dbt_project)
     assert len(result.manifest.relationships) == 1
     rel = result.manifest.relationships[0]
-    assert set(rel.models) == {"orders", "customers"}
+    model_names = set(rel.models)
+    assert model_names == {"orders", "customers"}
 
 
 def test_build_manifest_has_enum(dbt_project):

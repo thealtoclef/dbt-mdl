@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..models.wren_mdl import Relationship
+from ..models.wrapper import Relationship, JoinType
 
 
 def _model_name_from_unique_id(unique_id: str) -> str:
@@ -45,7 +45,7 @@ def build_relationships(manifest) -> list[Relationship]:
 
         rel_name = f"{from_model}_{from_col}_{to_model}_{to_col}"
         condition = f'"{from_model}"."{from_col}" = "{to_model}"."{to_col}"'
-        join_type = "MANY_TO_ONE"
+        join_type = JoinType.many_to_one
 
         dedup_key = (rel_name, join_type, condition)
         if dedup_key in seen:
@@ -56,7 +56,7 @@ def build_relationships(manifest) -> list[Relationship]:
             Relationship(
                 name=rel_name,
                 models=[from_model, to_model],
-                joinType=join_type,
+                join_type=join_type,
                 condition=condition,
             )
         )

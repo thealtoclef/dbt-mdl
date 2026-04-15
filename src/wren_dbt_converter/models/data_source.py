@@ -316,26 +316,26 @@ def _map_mysql_type(upper: str) -> str:
         case "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "ENUM" | "SET":
             return "text"
         case "BIT" | "TINYINT":
-            return "TINYINT"
+            return "tinyint"
         case "SMALLINT":
-            return "SMALLINT"
+            return "smallint"
         case "MEDIUMINT" | "INT" | "INTEGER":
-            return "INTEGER"
+            return "integer"
         case "BIGINT":
-            return "BIGINT"
+            return "bigint"
         case "FLOAT" | "DOUBLE":
-            return "DOUBLE"
+            return "double"
         case "DECIMAL" | "NUMERIC":
-            return "DECIMAL"
+            return "decimal"
         case "DATE":
-            return "DATE"
+            return "date"
         case "DATETIME":
-            return "DATETIME"
+            return "datetime"
         case "TIMESTAMP":
-            return "TIMESTAMPTZ"
+            return "timestamptz"
         case "BOOLEAN" | "BOOL":
-            return "BOOLEAN"
+            return "boolean"
         case "JSON":
-            return "JSON"
+            return "json"
         case _:
             return upper.lower()

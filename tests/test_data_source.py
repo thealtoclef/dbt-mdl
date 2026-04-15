@@ -353,7 +353,7 @@ def test_mssql_nvarchar():
 
 
 def test_mysql_timestamp():
-    assert map_column_type(WrenDataSource.mysql, "TIMESTAMP") == "TIMESTAMPTZ"
+    assert map_column_type(WrenDataSource.mysql, "TIMESTAMP") == "timestamptz"
 
 
 def test_postgres_passthrough():

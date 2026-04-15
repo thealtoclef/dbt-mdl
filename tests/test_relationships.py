@@ -1,5 +1,5 @@
 from wren_dbt_converter.processors.relationships import build_relationships
-from wren_dbt_converter.models.wren_mdl import Relationship
+from wren_dbt_converter.models.wrapper import Relationship, JoinType
 
 
 def test_builds_relationship_from_test(manifest):
@@ -9,7 +9,7 @@ def test_builds_relationship_from_test(manifest):
     assert isinstance(rel, Relationship)
     assert "orders" in rel.name
     assert "customers" in rel.name
-    assert rel.join_type == "MANY_TO_ONE"
+    assert rel.join_type == JoinType.many_to_one
     assert '"orders"."customer_id" = "customers"."customer_id"' == rel.condition
     assert set(rel.models) == {"orders", "customers"}
 

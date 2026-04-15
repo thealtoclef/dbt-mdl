@@ -9,10 +9,19 @@ from wren import DataSource as WrenDataSource
 from wren.memory.schema_indexer import describe_schema
 
 from .models.data_source import get_active_connection
-from .models.wren_mdl import TableReference, WrenMDLManifest, WrenModel
+from .models.wrapper import (
+    JoinType,
+    Relationship,
+    TableReference,
+    WrenColumn,
+    WrenMDLManifest,
+    WrenModel,
+    manifest_to_dict,
+)
 from .parsers.artifacts import load_catalog, load_manifest
 from .parsers.profiles_parser import analyze_dbt_profiles, find_profiles_file
 from .processors.columns import convert_columns
+from .processors.constraints import extract_constraints
 from .processors.relationships import build_relationships
 from .processors.tests_preprocessor import preprocess_tests
 
@@ -26,7 +35,9 @@ class ConvertResult:
 
     @property
     def manifest_str(self) -> str:
-        return self.manifest.to_manifest_str()
+        from .models.wrapper import manifest_to_base64
+
+        return manifest_to_base64(self.manifest)
 
 
 def build_manifest(
@@ -97,7 +108,10 @@ def build_manifest(
     # 6. Preprocess tests (enums, not-null)
     tests_result = preprocess_tests(manifest)
 
-    # 7. Build models from catalog nodes
+    # 7. Extract constraints (PK/FK from dbt v1.5+)
+    constraints_result = extract_constraints(manifest)
+
+    # 8. Build models from catalog nodes
     wren_models: list[WrenModel] = []
     for key, catalog_node in catalog.nodes.items():
         if not key.startswith("model."):
@@ -126,11 +140,13 @@ def build_manifest(
         )
         db = catalog_node.metadata.database
 
-        table_ref = TableReference(
-            catalog=db or None,
-            schema=schema or None,
-            table=model_name,
-        )
+        table_ref_kwargs: dict[str, Any] = {"table": model_name}
+        if db:
+            table_ref_kwargs["catalog"] = db
+        if schema:
+            table_ref_kwargs["schema"] = schema
+
+        table_ref = TableReference(**table_ref_kwargs)
 
         # Description from manifest
         props: dict[str, str] = {}
@@ -142,16 +158,43 @@ def build_manifest(
         wren_models.append(
             WrenModel(
                 name=model_name,
-                tableReference=table_ref,
+                table_reference=table_ref,
                 columns=columns,
+                primary_key=constraints_result.primary_keys.get(key),
                 properties=props if props else None,
             )
         )
 
-    # 8. Build relationships
-    relationships = build_relationships(manifest)
+    # 9. Build relationships (merge: constraints > tests)
+    test_relationships = build_relationships(manifest)
+    # Deduplicate: constraint-sourced relationships take priority
+    seen_names: set[str] = set()
+    relationships: list[Relationship] = []
+    for rel in constraints_result.foreign_key_relationships:
+        relationships.append(rel)
+        seen_names.add(rel.name)
+    for rel in test_relationships:
+        if rel.name not in seen_names:
+            relationships.append(rel)
 
-    # 9. Assemble MDL manifest
+    # 10. Add relationship columns to models
+    model_by_name: dict[str, WrenModel] = {m.name: m for m in wren_models}
+    for rel in relationships:
+        from_name = rel.models[0]
+        to_name = rel.models[1]
+
+        if rel.join_type == JoinType.many_to_one:
+            # MANY_TO_ONE: add relationship column on the "many" (from) model
+            _add_relationship_column(model_by_name, from_name, to_name, rel.name)
+        elif rel.join_type == JoinType.one_to_many:
+            # ONE_TO_MANY: add relationship column on the "one" (to) model
+            _add_relationship_column(model_by_name, to_name, from_name, rel.name)
+        elif rel.join_type in (JoinType.one_to_one, JoinType.many_to_many):
+            # Bidirectional: add on both
+            _add_relationship_column(model_by_name, from_name, to_name, rel.name)
+            _add_relationship_column(model_by_name, to_name, from_name, rel.name)
+
+    # 11. Assemble MDL manifest
     # Use the first model's db/schema as catalog-level values, or fall back to empty
     mdl_catalog = ""
     mdl_schema = ""
@@ -162,16 +205,47 @@ def build_manifest(
 
     wren_manifest = WrenMDLManifest(
         catalog=mdl_catalog,
-        schema=mdl_schema,
-        dataSource=str(data_source),
+        schema_=mdl_schema,
+        data_source=str(data_source),
         models=wren_models,
         relationships=relationships,
-        enumDefinitions=tests_result.enum_definitions,
+        enum_definitions=tests_result.enum_definitions,
     )
 
     return ConvertResult(
         manifest=wren_manifest,
         data_source=data_source,
         connection_info=connection_info,
-        schema_description=describe_schema(wren_manifest.to_camel_dict()),
+        schema_description=describe_schema(manifest_to_dict(wren_manifest)),
     )
+
+
+def _add_relationship_column(
+    model_by_name: dict[str, WrenModel],
+    source_model_name: str,
+    target_model_name: str,
+    relationship_name: str,
+) -> None:
+    """Add a relationship column to the source model pointing to the target model.
+
+    Uses a lowercase target model name as the column name (e.g., 'customer' on orders).
+    Skips if the source model doesn't exist in our models list.
+    """
+    model = model_by_name.get(source_model_name)
+    if model is None:
+        return
+
+    col_name = target_model_name.lower()
+
+    # Don't add duplicate relationship columns
+    if model.columns and any(c.name == col_name for c in model.columns):
+        return
+
+    rel_col = WrenColumn(
+        name=col_name,
+        type=target_model_name,
+        relationship=relationship_name,
+    )
+    if model.columns is None:
+        model.columns = []
+    model.columns.append(rel_col)
