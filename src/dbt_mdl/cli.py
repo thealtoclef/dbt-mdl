@@ -17,8 +17,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "format",
-        choices=["wren", "graphjin", "all"],
-        help="Output format.",
+        help="Comma-separated output formats: domain, wren, graphjin, or all.",
     )
     parser.add_argument(
         "--profiles",
@@ -91,13 +90,32 @@ def main(argv: list[str] | None = None) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        if args.format in ("wren", "all"):
+        requested = {f.strip() for f in args.format.split(",")}
+        valid = {"domain", "wren", "graphjin", "all"}
+        unknown = requested - valid
+        if unknown:
+            print(f"Error: unknown format(s): {', '.join(sorted(unknown))}", file=sys.stderr)
+            sys.exit(1)
+
+        formats = valid - {"all"} if "all" in requested else requested
+
+        if "domain" in formats:
+            _write_domain(project, output_dir)
+        if "wren" in formats:
             _write_wren(project, output_dir)
-        if args.format in ("graphjin", "all"):
+        if "graphjin" in formats:
             _write_graphjin(project, output_dir)
     except (ValueError, KeyError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+
+
+def _write_domain(project, output_dir: Path) -> None:
+    lineage = project.build_lineage_schema()
+    if lineage.table_lineage or lineage.column_lineage:
+        lineage_path = output_dir / "lineage.json"
+        lineage_path.write_text(lineage.model_dump_json(by_alias=True, indent=2))
+        print(f"lineage.json          -> {lineage_path}")
 
 
 def _write_wren(project, output_dir: Path) -> None:
