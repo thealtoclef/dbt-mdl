@@ -9,7 +9,6 @@ dependencies = [
     "dbt-artifacts-parser>=0.13.0",
     "dbt-colibri>=0.3.0",
     "pyyaml>=6.0.2",
-    "wren-engine>=0.2.1",
 ]
 
 [project.scripts]
@@ -18,7 +17,7 @@ dbt-mdl = "dbt_mdl.cli:main"
 [dependency-groups]
 test = ["pytest>=9.0.3", "pytest-cov>=7.1.0"]
 lint = ["ruff", "ty"]
-dev = ["datamodel-code-generator"]
+dev = ["datamodel-code-generator[http]"]
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12"]
@@ -35,13 +34,9 @@ target-python-version = "3.14"
 target-pydantic-version = "2.11"
 disable-timestamp = true
 
-[tool.datamodel-codegen.profiles.mdl]
-input = "jsonschema/mdl.schema.json"
-output = "src/dbt_mdl/models/_mdl.py"
-
-[tool.datamodel-codegen.profiles.lineage]
-input = "jsonschema/lineage.schema.json"
-output = "src/dbt_mdl/models/lineage.py"
+[tool.datamodel-codegen.profiles.wren-mdl]
+url = "https://raw.githubusercontent.com/Canner/WrenAI/main/wren-mdl/mdl.schema.json"
+output = "src/dbt_mdl/wren/codegen/mdl.py"
 
 [tool.pytest]
 testpaths = ["tests"]
