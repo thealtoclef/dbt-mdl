@@ -13,12 +13,12 @@ from .pipeline import extract_project
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="dbt-mdl",
-        description="Convert a dbt project to model definition formats (MDL, GraphJin).",
+        description="Convert a dbt project to model definition formats.",
     )
     parser.add_argument(
         "project_path",
         type=Path,
-        help="Path to the dbt project root (must contain dbt_project.yml and profiles.yml).",
+        help="Path to the dbt project root (must contain profiles.yml).",
     )
     parser.add_argument(
         "--output",
@@ -30,9 +30,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--format",
         dest="fmt",
-        choices=["mdl", "graphjin", "all"],
-        default="mdl",
-        help="Output format: 'mdl' (default), 'graphjin', or 'all'.",
+        choices=["wren", "graphjin", "all"],
+        default="all",
+        help="Output format (default: all).",
     )
     parser.add_argument(
         "--catalog",
@@ -128,14 +128,10 @@ def main(argv: list[str] | None = None) -> None:
     if fmt in ("graphjin", "all"):
         gj = format_graphjin(project)
 
-        dev_yml_path = output_dir / "dev.yml"
-        dev_yml_path.write_text(gj.dev_yml)
-        print(f"dev.yml               -> {dev_yml_path}")
-
         db_graphql_path = output_dir / "db.graphql"
         db_graphql_path.write_text(gj.db_graphql)
         print(f"db.graphql            -> {db_graphql_path}")
 
-        prod_yml_path = output_dir / "prod.yml"
-        prod_yml_path.write_text(gj.prod_yml)
-        print(f"prod.yml              -> {prod_yml_path}")
+        config_yml_path = output_dir / "config.yml"
+        config_yml_path.write_text(gj.config_yml)
+        print(f"config.yml            -> {config_yml_path}")
