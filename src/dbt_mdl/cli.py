@@ -132,6 +132,6 @@ def main(argv: list[str] | None = None) -> None:
         db_graphql_path.write_text(gj.db_graphql)
         print(f"db.graphql            -> {db_graphql_path}")
 
-        config_yml_path = output_dir / "config.yml"
-        config_yml_path.write_text(gj.config_yml)
-        print(f"config.yml            -> {config_yml_path}")
+        dev_yml_path = output_dir / "dev.yml"
+        dev_yml_path.write_text(gj.dev_yml)
+        print(f"dev.yml               -> {dev_yml_path}")

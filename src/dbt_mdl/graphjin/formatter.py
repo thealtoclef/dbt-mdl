@@ -1,152 +1,64 @@
 """Format dbt project info as GraphJin configuration.
 
 Produces:
-- dev.yml: database connection + table definitions + enable_schema
-- db.graphql: full schema with @id and @relation directives
-- prod.yml: production template with access control placeholders
+- db.graphql: GraphJin SDL schema (consumed by `graphjin db diff` / `db sync`
+  and by the compiler when `enable_schema: true`).
+- dev.yml: connection + schema settings. Loaded by default when `GO_ENV` is unset.
+
+Scalar emission follows GraphJin's template in `core/schema.go`: the SDL type
+is the raw SQL column type pascal-cased per whitespace-separated word. It
+roundtrips back through the query-compiler's `pascalToSnakeSpace` to a lowercase
+SQL-style token that matches GraphJin's DDL mapper.
 """
 
 from __future__ import annotations
 
+import re
+from typing import Any
+
+import yaml
 from pydantic import BaseModel
 
-from ..domain.models import DbtProjectInfo
+from ..domain.models import ColumnInfo, DbtProjectInfo, ModelInfo, RelationshipInfo
 
 # ---------------------------------------------------------------------------
-# Type mapping: raw DB type → GraphJin GraphQL type
+# dbt adapter → GraphJin database type.
+#
+# None = unsupported by GraphJin. We still emit a config.yml with a clear
+# header comment so users notice rather than silently getting a broken config.
 # ---------------------------------------------------------------------------
 
-_GRAPHJIN_TYPE_MAP: dict[str, str] = {
-    # Integer types
-    "INTEGER": "Integer",
-    "INT": "Integer",
-    "INT4": "Integer",
-    "SMALLINT": "SmallInt",
-    "INT2": "SmallInt",
-    "BIGINT": "BigInt",
-    "INT8": "BigInt",
-    "TINYINT": "SmallInt",
-    # String types
-    "VARCHAR": "Varchar",
-    "TEXT": "Text",
-    "CHAR": "Character",
-    "CHARACTER": "Character",
-    "CHARACTER VARYING": "Varchar",
-    "NVARCHAR": "Varchar",
-    "NCHAR": "Character",
-    "NTEXT": "Text",
-    "STRING": "Text",
-    # Boolean
-    "BOOLEAN": "Boolean",
-    "BOOL": "Boolean",
-    "BIT": "Boolean",
-    # Date/Time
-    "DATE": "Date",
-    "TIMESTAMP": "Timestamp",
-    "DATETIME": "Timestamp",
-    "TIMESTAMPTZ": "TimestampWithTimeZone",
-    "TIMESTAMP WITH TIME ZONE": "TimestampWithTimeZone",
-    "TIMESTAMP WITHOUT TIME ZONE": "Timestamp",
-    "TIME": "Time",
-    "INTERVAL": "Interval",
-    # Numeric
-    "DOUBLE": "Numeric",
-    "FLOAT": "Numeric",
-    "FLOAT8": "Numeric",
-    "FLOAT4": "Numeric",
-    "REAL": "Numeric",
-    "DECIMAL": "Numeric",
-    "NUMERIC": "Numeric",
-    "MONEY": "Numeric",
-    "SMALLMONEY": "Numeric",
-    # JSON
-    "JSON": "Jsonb",
-    "JSONB": "Jsonb",
-    # Binary
-    "BYTEA": "Bytes",
-    "BLOB": "Bytes",
-    "BYTES": "Bytes",
-    # Other
-    "UUID": "Varchar",
-    "INET": "Varchar",
-    "TSVECTOR": "Tsvector",
-}
-
-# BigQuery-specific type overrides
-_BIGQUERY_TYPE_MAP: dict[str, str] = {
-    "INT64": "BigInt",
-    "FLOAT64": "Numeric",
-    "NUMERIC": "Numeric",
-    "BIGNUMERIC": "Numeric",
-}
-
-
-def _map_graphjin_type(raw_type: str, data_source: str = "") -> str:
-    """Map a raw DB column type to a GraphJin GraphQL type."""
-    upper = raw_type.upper().strip()
-
-    # Strip type parameters like VARCHAR(255) → VARCHAR
-    base = upper.split("(")[0].split("[")[0].strip()
-
-    # Try BigQuery-specific first
-    if data_source == "bigquery":
-        mapped = _BIGQUERY_TYPE_MAP.get(base)
-        if mapped:
-            return mapped
-
-    # Try generic mapping
-    mapped = _GRAPHJIN_TYPE_MAP.get(base)
-    if mapped:
-        return mapped
-
-    # Array types (e.g., "INTEGER[]", "TEXT[]")
-    if upper.endswith("[]"):
-        inner = upper[:-2].strip()
-        inner_mapped = _GRAPHJIN_TYPE_MAP.get(inner, "Varchar")
-        return f"[{inner_mapped}]"
-
-    # BigQuery array notation "ARRAY<...>"
-    if upper.startswith("ARRAY<") and upper.endswith(">"):
-        inner = upper[6:-1].strip()
-        inner_mapped = _GRAPHJIN_TYPE_MAP.get(inner, "Varchar")
-        return f"[{inner_mapped}]"
-
-    # Fallback: capitalize first letter
-    return base.capitalize() if base else "Varchar"
-
-
-# ---------------------------------------------------------------------------
-# dbt data source → GraphJin database type
-# ---------------------------------------------------------------------------
-
-_GRAPHJIN_DB_TYPE_MAP: dict[str, str] = {
+_DB_TYPE_MAP: dict[str, str | None] = {
     "postgres": "postgres",
     "postgresql": "postgres",
-    "duckdb": "postgres",  # GraphJin doesn't support DuckDB natively; use postgres protocol
     "mysql": "mysql",
-    "sqlserver": "mssql",
-    "mssql": "mssql",
+    "mariadb": "mariadb",
+    "sqlite": "sqlite",
+    "oracle": "oracle",
     "snowflake": "snowflake",
-    "bigquery": "snowflake",  # GraphJin doesn't support BigQuery; placeholder
+    "mssql": "mssql",
+    "sqlserver": "mssql",
+    # Not supported natively by GraphJin:
+    "bigquery": None,
+    "duckdb": None,
+    "redshift": None,
 }
 
 
-def _map_db_type(data_source: str) -> str:
-    """Map dbt adapter type to GraphJin database type."""
-    return _GRAPHJIN_DB_TYPE_MAP.get(data_source.lower(), "postgres")
+def _map_db_type(data_source: str) -> str | None:
+    return _DB_TYPE_MAP.get(data_source.lower(), None)
 
 
 # ---------------------------------------------------------------------------
-# Output types
+# Output type
 # ---------------------------------------------------------------------------
 
 
 class GraphJinResult(BaseModel):
     """GraphJin configuration output."""
 
-    dev_yml: str
     db_graphql: str
-    prod_yml: str
+    dev_yml: str
 
 
 # ---------------------------------------------------------------------------
@@ -157,72 +69,126 @@ class GraphJinResult(BaseModel):
 def format_graphjin(project: DbtProjectInfo) -> GraphJinResult:
     """Convert domain-neutral DbtProjectInfo into GraphJin config files."""
     return GraphJinResult(
-        dev_yml=_build_dev_yml(project),
         db_graphql=_build_db_graphql(project),
-        prod_yml=_build_prod_yml(project),
+        dev_yml=_build_dev_yml(project),
     )
 
 
 # ---------------------------------------------------------------------------
-# dev.yml builder
+# Type parsing / pascal-case emission
 # ---------------------------------------------------------------------------
 
+# Matches "type(size)" where size may contain comma/digits/etc.
+_TYPE_WITH_SIZE_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9 _]*?)\s*\((.+)\)\s*$")
 
-def _build_dev_yml(project: DbtProjectInfo) -> str:
-    """Build the development config YAML."""
-    lines: list[str] = []
 
-    # Database section
-    db_type = _map_db_type(project.data_source)
-    conn = project.connection_info
+def _parse_sql_type(raw: str) -> tuple[str, str, bool]:
+    """Split a raw SQL type into (base, size, is_array).
 
-    lines.append("database:")
-    lines.append(f"  type: {db_type}")
+    >>> _parse_sql_type("VARCHAR(255)")
+    ('varchar', '255', False)
+    >>> _parse_sql_type("NUMERIC(10,2)")
+    ('numeric', '10,2', False)
+    >>> _parse_sql_type("INTEGER[]")
+    ('integer', '', True)
+    >>> _parse_sql_type("TIMESTAMP WITH TIME ZONE")
+    ('timestamp with time zone', '', False)
+    >>> _parse_sql_type("ARRAY<STRING>")
+    ('string', '', True)
+    """
+    if not raw:
+        return "", "", False
 
-    # Connection fields vary by adapter
-    if "host" in conn:
-        lines.append(f"  host: {_yaml_str(conn['host'])}")
-    if "port" in conn:
-        lines.append(f"  port: {conn['port']}")
-    if "database" in conn:
-        lines.append(f"  dbname: {_yaml_str(conn['database'])}")
-    if "user" in conn:
-        lines.append(f"  user: {_yaml_str(conn['user'])}")
-    if "password" in conn:
-        password = conn["password"]
-        if password:
-            lines.append(f"  password: {_yaml_str(password)}")
-    if "url" in conn:
-        # DuckDB-style
-        lines.append(f"  connection_string: {_yaml_str(conn['url'])}")
+    s = raw.strip()
+    is_array = False
 
-    lines.append("")
+    # BigQuery ARRAY<T>
+    upper = s.upper()
+    if upper.startswith("ARRAY<") and s.endswith(">"):
+        inner = s[6:-1].strip()
+        base, size, _ = _parse_sql_type(inner)
+        return base, size, True
 
-    # Enable schema-driven mode (no DB introspection needed)
-    lines.append("enable_schema: true")
-    lines.append("")
+    # Postgres T[]
+    if s.endswith("[]"):
+        is_array = True
+        s = s[:-2].strip()
 
-    # Table aliases (dbt model name → physical table)
-    if project.models:
-        lines.append("tables:")
-        for model in project.models:
-            # Only add table entry if model name differs from table name,
-            # or if there are custom column relationships
-            lines.append(f"  - name: {model.name}")
-            lines.append(f"    table: {model.table_name}")
+    m = _TYPE_WITH_SIZE_RE.match(s)
+    if m:
+        base = m.group(1).strip().lower()
+        size = m.group(2).strip()
+        return base, size, is_array
 
-            # Add custom relationships (columns with related_to)
-            # These are for relationships not discoverable via DB foreign keys
-            has_related_columns = False
-            for rel in model.relationships:
-                if model.name == rel.from_model:
-                    if not has_related_columns:
-                        lines.append("    columns:")
-                        has_related_columns = True
-                    lines.append(f"      - name: {rel.from_column}")
-                    lines.append(f"        related_to: {rel.to_model}.{rel.to_column}")
+    return s.lower(), "", is_array
 
-    return "\n".join(lines) + "\n"
+
+def _pascal(name: str) -> str:
+    """Pascal-case each whitespace-separated word.
+
+    Matches GraphJin's template helper so the emitted SDL roundtrips through
+    `pascalToSnakeSpace` back to the original lowercase SQL token.
+
+    >>> _pascal("bigint")
+    'Bigint'
+    >>> _pascal("big int")
+    'BigInt'
+    >>> _pascal("timestamp with time zone")
+    'TimestampWithTimeZone'
+    >>> _pascal("character varying")
+    'CharacterVarying'
+    """
+    parts = [p for p in name.strip().split() if p]
+    if not parts:
+        return ""
+    return "".join(p[:1].upper() + p[1:].lower() for p in parts)
+
+
+# A few well-known synonyms we normalize before pascaling, so the resulting
+# SDL looks natural (and hits a case in GraphJin's DDL mapper).
+_SQL_TYPE_ALIASES: dict[str, str] = {
+    # Normalize to the space-separated forms GraphJin's DDL mapper accepts —
+    # the pascal-cased output (e.g. "big int" → "BigInt") matches webshop
+    # example conventions and roundtrips cleanly through pascalToSnakeSpace.
+    "int": "integer",
+    "int2": "small int",
+    "int4": "integer",
+    "int8": "big int",
+    "bigint": "big int",
+    "smallint": "small int",
+    "bigserial": "big serial",
+    "tinyint": "small int",
+    "bool": "boolean",
+    "float4": "real",
+    "float8": "double precision",
+    "float": "double precision",
+    "double": "double precision",
+    "string": "text",
+    "nvarchar": "varchar",
+    "nchar": "char",
+    "ntext": "text",
+    "datetime": "timestamp",
+    "timestamptz": "timestamp with time zone",
+    "timestamp without time zone": "timestamp",
+    "int64": "big int",
+    "float64": "double precision",
+    "bignumeric": "numeric",
+    "bytes": "bytea",
+    "blob": "bytea",
+    "bit": "boolean",
+}
+
+
+def _sql_to_gql_type(raw: str) -> tuple[str, str]:
+    """Return (gql_type_name, size_args) for a raw SQL type string.
+
+    Does not include the array wrapping or the `!` suffix — caller handles those.
+    """
+    base, size, _is_array = _parse_sql_type(raw)
+    base = _SQL_TYPE_ALIASES.get(base, base)
+    if not base:
+        return "Text", size
+    return _pascal(base), size
 
 
 # ---------------------------------------------------------------------------
@@ -231,125 +197,199 @@ def _build_dev_yml(project: DbtProjectInfo) -> str:
 
 
 def _build_db_graphql(project: DbtProjectInfo) -> str:
-    """Build the GraphQL SDL schema file."""
-    lines: list[str] = []
+    """Build the GraphJin SDL schema file."""
+    gj_db = _map_db_type(project.data_source) or "postgres"
+    schema_name = _default_schema(project)
+    header = f"# dbinfo:{gj_db},,{schema_name}\n"
 
-    # Build a map of which columns have relationships
-    # from_model.from_column → (to_model, to_column)
-    rel_map: dict[str, dict[str, tuple[str, str]]] = {}
-    for rel in project.relationships:
-        rel_map.setdefault(rel.from_model, {})[rel.from_column] = (
-            rel.to_model,
-            rel.to_column,
-        )
-
+    rel_map = _build_rel_map(project.relationships)
+    blocks: list[str] = [header]
     for model in project.models:
-        lines.append(f"type {model.name} {{")
-        for col in model.columns:
-            gql_type = _map_graphjin_type(col.type, project.data_source)
-            directives: list[str] = []
+        blocks.append("")
+        blocks.append(_type_block(model, rel_map, project))
+    return "\n".join(blocks).rstrip() + "\n"
 
-            # Primary key
-            if col.is_primary_key or col.name == model.primary_key:
-                directives.append("@id")
 
-            # Relationship
-            if model.name in rel_map and col.name in rel_map[model.name]:
-                target_model, target_col = rel_map[model.name][col.name]
-                directives.append(
-                    f"@relation(type: {target_model}, field: {target_col})"
-                )
+def _default_schema(project: DbtProjectInfo) -> str:
+    for m in project.models:
+        if m.schema_:
+            return m.schema_
+    return ""
 
-            # Nullable vs required
-            type_suffix = "!" if col.not_null else ""
 
-            dir_str = " " + " ".join(directives) if directives else ""
-            lines.append(f"  {col.name}: {gql_type}{type_suffix}{dir_str}")
+def _build_rel_map(
+    relationships: list[RelationshipInfo],
+) -> dict[tuple[str, str], tuple[str, str]]:
+    rel_map: dict[tuple[str, str], tuple[str, str]] = {}
+    for rel in relationships:
+        if not rel.from_column or not rel.to_column:
+            continue
+        rel_map[(rel.from_model, rel.from_column)] = (rel.to_model, rel.to_column)
+    return rel_map
 
-        lines.append("}")
-        lines.append("")
 
+def _type_block(
+    model: ModelInfo,
+    rel_map: dict[tuple[str, str], tuple[str, str]],
+    project: DbtProjectInfo,
+) -> str:
+    type_directives: list[str] = []
+    if model.catalog:
+        type_directives.append(f"@database(name: {model.catalog})")
+    if model.schema_ and model.schema_ != "public":
+        type_directives.append(f"@schema(name: {model.schema_})")
+
+    header = f"type {model.name}"
+    if type_directives:
+        header += " " + " ".join(type_directives)
+    header += " {"
+
+    lines = [header]
+    for col in model.columns:
+        lines.append("  " + _column_line(model, col, rel_map))
+    lines.append("}")
     return "\n".join(lines)
 
 
+def _column_line(
+    model: ModelInfo,
+    col: ColumnInfo,
+    rel_map: dict[tuple[str, str], tuple[str, str]],
+) -> str:
+    gql_base, size = _sql_to_gql_type(col.type)
+    _, _, is_array = _parse_sql_type(col.type)
+    gql = f"[{gql_base}]" if is_array else gql_base
+    if col.not_null:
+        gql += "!"
+
+    directives: list[str] = []
+    if size:
+        directives.append(f'@type(args: "{size}")')
+    if col.is_primary_key or col.name == model.primary_key:
+        directives.append("@id")
+    if col.unique and not (col.is_primary_key or col.name == model.primary_key):
+        directives.append("@unique")
+    if col.is_hidden:
+        directives.append("@blocked")
+
+    rel = rel_map.get((model.name, col.name))
+    if rel:
+        target_model, target_col = rel
+        directives.append(f"@relation(type: {target_model}, field: {target_col})")
+
+    dir_str = " ".join(directives)
+    line = f"{col.name}: {gql}"
+    if dir_str:
+        line += f" {dir_str}"
+    return line
+
+
 # ---------------------------------------------------------------------------
-# prod.yml builder
+# config.yml builder
 # ---------------------------------------------------------------------------
 
-_PROD_YML_TEMPLATE = """\
-inherits: dev
-production: true
-default_block: true
 
-# ---
-# Access Control Configuration
-# Uncomment and customize for your auth setup.
-# See: https://graphjin.com/pages/auth.html
-# ---
+def _build_dev_yml(project: DbtProjectInfo) -> str:
+    """Build the development config YAML.
 
-# auth:
-#   type: jwt
-#   jwt:
-#     provider: auth0
-#     secret: "$JWT_SECRET"
-
-# roles_query: "SELECT role FROM user_roles WHERE user_id = $user_id"
-
-# roles:
-#   - name: anon
-#     tables:
-#       - name: products
-#         query:
-#           limit: 10
-#           columns: [id, name, description]
-
-#   - name: user
-#     match: role = 'user'
-#     tables:
-#       - name: users
-#         query:
-#           filters: ["{ id: { _eq: $user_id } }"]
-#       - name: orders
-#         query:
-#           filters: ["{ user_id: { _eq: $user_id } }"]
-#         insert:
-#           presets:
-#             - user_id: "$user_id"
-#             - created_at: "now"
-
-#   - name: admin
-#     match: role = 'admin'
-#     tables:
-#       - name: users
-#         query:
-#           limit: 100
-"""
-
-
-def _build_prod_yml(project: DbtProjectInfo) -> str:
-    """Build the production config template with role placeholders."""
-    # Add model-specific comments for each table
-    model_comments = "\n".join(f"#       - name: {m.name}" for m in project.models)
-    template = _PROD_YML_TEMPLATE
-    if model_comments:
-        # Insert model list as comment in the anon role section
-        template = template.replace(
-            "#       - name: products\n#         query:\n#           limit: 10\n#           columns: [id, name, description]",
-            f"# Available tables:\n{model_comments}\n#         query:\n#           limit: 10",
+    Named `dev.yml` so GraphJin loads it by default (GO_ENV unset → dev).
+    """
+    gj_db = _map_db_type(project.data_source)
+    header_lines: list[str] = [
+        "# GraphJin configuration generated from a dbt project.",
+    ]
+    if gj_db is None:
+        header_lines.append(
+            f"# WARNING: dbt adapter `{project.data_source}` is not supported by "
+            "GraphJin. This config is a scaffold only; the database block will "
+            "need manual edits before it can connect."
         )
-    return template
+
+    config: dict[str, Any] = {
+        "app_name": "dbt GraphJin API",
+        "host_port": "0.0.0.0:8080",
+        "web_ui": True,
+        "production": False,
+        "enable_schema": True,
+        "default_block": False,
+        "default_limit": 20,
+        "database": _database_block(project, gj_db),
+        "auth": {"type": "none"},
+    }
+
+    tables = _tables_block(project)
+    if tables:
+        config["tables"] = tables
+
+    yml = yaml.safe_dump(config, sort_keys=False, width=100)
+    return "\n".join(header_lines) + "\n\n" + yml
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _database_block(project: DbtProjectInfo, gj_db: str | None) -> dict[str, Any]:
+    conn = project.connection_info or {}
+
+    # Unsupported adapter: emit a placeholder with a clearly-wrong type so the
+    # user edits it. Don't leak dbt-only fields like `url`/`format`.
+    if gj_db is None:
+        # Unsupported adapter — emit a plain postgres placeholder; the file
+        # header warns the user this needs manual editing.
+        return {
+            "type": "postgres",
+            "host": "localhost",
+            "port": 5432,
+            "dbname": "replace_me",
+            "user": "postgres",
+            "password": "",
+        }
+
+    block: dict[str, Any] = {"type": gj_db}
+
+    schema = _default_schema(project)
+    if schema and gj_db == "postgres":
+        block["schema"] = schema
+
+    for src_key, dst_key in [
+        ("host", "host"),
+        ("port", "port"),
+        ("database", "dbname"),
+        ("user", "user"),
+        ("password", "password"),
+    ]:
+        if src_key in conn and conn[src_key] not in (None, ""):
+            block[dst_key] = conn[src_key]
+
+    return block
 
 
-def _yaml_str(value: str) -> str:
-    """Quote a YAML string value if it contains special characters."""
-    if not value:
-        return '""'
-    # Quote if contains special chars
-    if any(c in value for c in ":{}[]&*?|>!%@`#,'\""):
-        return f'"{value}"'
-    return value
+def _tables_block(project: DbtProjectInfo) -> list[dict[str, Any]]:
+    """Emit `tables:` entries only when there is meaningful per-table config.
+
+    Skips redundant `name: X / table: X` aliases with no custom columns —
+    GraphJin's schema introspection handles trivial cases already.
+    """
+    entries: list[dict[str, Any]] = []
+    for model in project.models:
+        columns_cfg: list[dict[str, Any]] = []
+        for rel in model.relationships:
+            if rel.from_model != model.name:
+                continue
+            if not rel.from_column or not rel.to_column:
+                continue
+            columns_cfg.append(
+                {
+                    "name": rel.from_column,
+                    "related_to": f"{rel.to_model}.{rel.to_column}",
+                }
+            )
+
+        needs_alias = model.table_name and model.table_name != model.name
+        if not columns_cfg and not needs_alias:
+            continue
+
+        entry: dict[str, Any] = {"name": model.name}
+        if needs_alias:
+            entry["table"] = model.table_name
+        if columns_cfg:
+            entry["columns"] = columns_cfg
+        entries.append(entry)
+    return entries
