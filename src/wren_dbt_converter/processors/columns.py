@@ -4,7 +4,7 @@ from __future__ import annotations
 from wren import DataSource as WrenDataSource
 
 from ..models.data_source import map_column_type
-from ..models.wrapper import WrenColumn
+from ..models.mdl import WrenColumn
 
 
 def convert_columns(

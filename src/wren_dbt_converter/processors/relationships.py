@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..models.wrapper import Relationship, JoinType
+from ..models.mdl import Relationship, JoinType
 
 
 def _model_name_from_unique_id(unique_id: str) -> str:

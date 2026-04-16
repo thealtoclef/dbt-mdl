@@ -1,5 +1,5 @@
 from wren_dbt_converter.processors.relationships import build_relationships
-from wren_dbt_converter.models.wrapper import Relationship, JoinType
+from wren_dbt_converter.models.mdl import Relationship, JoinType
 
 
 def test_builds_relationship_from_test(manifest):

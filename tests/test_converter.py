@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 
 from wren_dbt_converter import build_manifest, ConvertResult
-from wren_dbt_converter.models.wrapper import WrenMDLManifest
+from wren_dbt_converter.models.mdl import WrenMDLManifest
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

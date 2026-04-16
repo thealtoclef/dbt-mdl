@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..models.wrapper import EnumDefinition, EnumValue
+from ..models.mdl import EnumDefinition, EnumValue
 
 
 @dataclass

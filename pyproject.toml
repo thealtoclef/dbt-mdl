@@ -37,7 +37,7 @@ disable-timestamp = true
 
 [tool.datamodel-codegen.profiles.mdl]
 input = "wren-mdl/mdl.schema.json"
-output = "src/wren_dbt_converter/models/mdl.py"
+output = "src/wren_dbt_converter/models/_mdl.py"
 
 [tool.datamodel-codegen.profiles.lineage]
 input = "wren-mdl/lineage.schema.json"

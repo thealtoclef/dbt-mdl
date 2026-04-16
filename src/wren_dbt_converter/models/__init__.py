@@ -1,4 +1,4 @@
-from .wrapper import (
+from .mdl import (
     EnumDefinition,
     EnumValue,
     TableReference,

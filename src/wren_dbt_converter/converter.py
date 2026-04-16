@@ -10,7 +10,7 @@ from wren import DataSource as WrenDataSource
 
 from .models.data_source import get_active_connection
 from .models.lineage import LineageSchema
-from .models.wrapper import (
+from .models.mdl import (
     JoinType,
     Relationship,
     TableReference,
