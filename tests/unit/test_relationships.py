@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-from dbt_mdl.dbt.artifacts import load_manifest
-from dbt_mdl.dbt.processors.relationships import build_relationships
-from dbt_mdl.wren.models import Relationship, JoinType
+from dbt_graphql.dbt.artifacts import load_manifest
+from dbt_graphql.dbt.processors.relationships import build_relationships
+from dbt_graphql.ir.models import ProcessorRelationship, JoinType
 
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "dbt-artifacts"
@@ -15,7 +15,7 @@ def test_builds_relationship_from_test():
     rels = build_relationships(manifest)
     assert len(rels) == 1
     rel = rels[0]
-    assert isinstance(rel, Relationship)
+    assert isinstance(rel, ProcessorRelationship)
     assert "orders" in rel.name
     assert "customers" in rel.name
     assert rel.join_type == JoinType.many_to_one

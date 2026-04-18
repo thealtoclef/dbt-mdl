@@ -7,9 +7,42 @@ consume them to produce format-specific output.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, constr
+
+
+# ---------------------------------------------------------------------------
+# Processor types (used by dbt/processors — format-agnostic)
+# ---------------------------------------------------------------------------
+
+
+class JoinType(StrEnum):
+    many_to_one = "many_to_one"
+    one_to_many = "one_to_many"
+    one_to_one = "one_to_one"
+    many_to_many = "many_to_many"
+
+
+@dataclass
+class ProcessorRelationship:
+    name: str
+    models: list[str]
+    join_type: JoinType
+    condition: str = ""
+
+
+@dataclass
+class EnumValue:
+    name: str
+
+
+@dataclass
+class EnumDefinition:
+    name: str
+    values: list[EnumValue] = dc_field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

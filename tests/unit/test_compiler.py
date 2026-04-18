@@ -6,8 +6,8 @@ when compiled against different SQLAlchemy dialects.
 
 from sqlalchemy.dialects import mysql, postgresql, sqlite
 
-from dbt_mdl.graphql.compiler import compile_query
-from dbt_mdl.graphql.schema import (
+from dbt_graphql.compiler.query import compile_query
+from dbt_graphql.formatter.schema import (
     ColumnDef,
     RelationDef,
     TableDef,

@@ -1,7 +1,7 @@
 [project]
-name = "dbt-mdl"
+name = "dbt-graphql"
 version = "0.1.0"
-description = "Convert dbt project to Modeling Definition Language"
+description = "Convert dbt artifacts to GraphQL schema and serve a SQL-backed GraphQL API"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = "MIT"
@@ -17,44 +17,20 @@ duckdb = ["duckdb-engine>=0.17"]
 sqlite = ["aiosqlite>=0.22.1"]
 postgres = ["asyncpg>=0.31"]
 mysql = ["aiomysql>=0.3.2"]
-api = [
-    "ariadne>=1.0.1",
-    "fastapi>=0.136.0",
-    "granian>=2.7.3",
-]
+api = ["ariadne>=1.0.1", "fastapi>=0.136.0", "granian>=2.7.3"]
+mcp = ["fastmcp>=3.2.4"]
 
 [project.scripts]
-dbt-mdl = "dbt_mdl.cli:main"
+dbt-graphql = "dbt_graphql.cli:main"
 
 [dependency-groups]
-test = [
-    "pytest",
-    "pytest-cov",
-    "pytest-asyncio",
-    "pytest-docker",
-    "httpx",
-]
+test = ["pytest", "pytest-cov", "pytest-asyncio", "pytest-docker", "httpx"]
 lint = ["ruff", "ty"]
-dev = ["datamodel-code-generator[http]"]
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12"]
 build-backend = "uv_build"
 
-[tool.datamodel-codegen]
-input-file-type = "jsonschema"
-output-model-type = "pydantic_v2.BaseModel"
-snake-case-field = "true"
-use-type-alias = true
-allow-population-by-field-name = "true"
-formatters = ["ruff-check", "ruff-format"]
-target-python-version = "3.14"
-target-pydantic-version = "2.11"
-disable-timestamp = true
-
-[tool.datamodel-codegen.profiles.wren-mdl]
-url = "https://raw.githubusercontent.com/Canner/WrenAI/main/wren-mdl/mdl.schema.json"
-output = "src/dbt_mdl/wren/codegen/mdl.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

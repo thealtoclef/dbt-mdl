@@ -14,7 +14,7 @@ from sqlalchemy import Column, Select, literal, select, table
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.expression import FunctionElement
 
-from .schema import ColumnDef, RelationDef, TableDef, TableRegistry
+from ..formatter.schema import ColumnDef, RelationDef, TableDef, TableRegistry
 
 
 # ---------------------------------------------------------------------------

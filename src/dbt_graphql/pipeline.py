@@ -221,7 +221,5 @@ def _wren_rel_to_domain(rel: Any) -> RelationshipInfo:
         from_column=from_col,
         to_model=rel.models[1],
         to_column=to_col,
-        join_type=str(rel.join_type.value)
-        if hasattr(rel.join_type, "value")
-        else str(rel.join_type),
+        join_type=str(rel.join_type),
     )

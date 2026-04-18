@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from dbt_mdl import extract_project, format_graphql
+from dbt_graphql import extract_project, format_graphql
 
 
 DUCKDB_DIR = Path(__file__).parent.parent / "fixtures" / "dbt-artifacts"
@@ -59,8 +59,8 @@ class TestDbGraphQL:
 
 class TestTypeMapping:
     def test_pascal_case_type_names(self):
-        from dbt_mdl.graphql.formatter import _column_line
-        from dbt_mdl.ir.models import ColumnInfo, ModelInfo
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
 
         m = ModelInfo(name="t", database="db", schema_="public", columns=[])
 
@@ -75,8 +75,8 @@ class TestTypeMapping:
         assert '@sql(type: "VARCHAR", size: "255")' in line
 
     def test_multiword_types(self):
-        from dbt_mdl.graphql.formatter import _column_line
-        from dbt_mdl.ir.models import ColumnInfo, ModelInfo
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
 
         m = ModelInfo(name="t", database="db", schema_="public", columns=[])
 
@@ -86,8 +86,8 @@ class TestTypeMapping:
         assert '@sql(type: "TIMESTAMP WITH TIME ZONE")' in line
 
     def test_array_type(self):
-        from dbt_mdl.graphql.formatter import _column_line
-        from dbt_mdl.ir.models import ColumnInfo, ModelInfo
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
 
         m = ModelInfo(name="t", database="db", schema_="public", columns=[])
 
@@ -97,8 +97,8 @@ class TestTypeMapping:
         assert '@sql(type: "TEXT")' in line
 
     def test_bigquery_array(self):
-        from dbt_mdl.graphql.formatter import _column_line
-        from dbt_mdl.ir.models import ColumnInfo, ModelInfo
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
 
         m = ModelInfo(name="t", database="db", schema_="public", columns=[])
 
@@ -108,8 +108,8 @@ class TestTypeMapping:
         assert '@sql(type: "STRING")' in line
 
     def test_empty_type_no_fallback(self):
-        from dbt_mdl.graphql.formatter import _column_line
-        from dbt_mdl.ir.models import ColumnInfo, ModelInfo
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
 
         m = ModelInfo(name="t", database="db", schema_="public", columns=[])
         c = ColumnInfo(name="x", type="", not_null=False)
@@ -117,6 +117,117 @@ class TestTypeMapping:
         # Empty type → empty pascal, but @sql still emitted with empty value
         assert "x: " in line
         assert '@sql(type: "")' in line
+
+
+class TestParseSqlType:
+    def test_simple_type(self):
+        from dbt_graphql.formatter.graphql import _parse_sql_type
+
+        assert _parse_sql_type("INTEGER") == ("INTEGER", "", False)
+
+    def test_type_with_size(self):
+        from dbt_graphql.formatter.graphql import _parse_sql_type
+
+        assert _parse_sql_type("VARCHAR(255)") == ("VARCHAR", "255", False)
+
+    def test_numeric_with_precision_scale(self):
+        from dbt_graphql.formatter.graphql import _parse_sql_type
+
+        assert _parse_sql_type("NUMERIC(10,2)") == ("NUMERIC", "10,2", False)
+
+    def test_double_precision(self):
+        from dbt_graphql.formatter.graphql import _parse_sql_type
+
+        assert _parse_sql_type("DOUBLE PRECISION") == ("DOUBLE PRECISION", "", False)
+
+    def test_timestamp_with_time_zone(self):
+        from dbt_graphql.formatter.graphql import _parse_sql_type
+
+        assert _parse_sql_type("TIMESTAMP WITH TIME ZONE") == (
+            "TIMESTAMP WITH TIME ZONE",
+            "",
+            False,
+        )
+
+    def test_postgres_array(self):
+        from dbt_graphql.formatter.graphql import _parse_sql_type
+
+        base, size, is_array = _parse_sql_type("TEXT[]")
+        assert base == "TEXT"
+        assert is_array is True
+        assert size == ""
+
+    def test_bigquery_array(self):
+        from dbt_graphql.formatter.graphql import _parse_sql_type
+
+        base, size, is_array = _parse_sql_type("ARRAY<STRING>")
+        assert base == "STRING"
+        assert is_array is True
+
+    def test_empty_string(self):
+        from dbt_graphql.formatter.graphql import _parse_sql_type
+
+        assert _parse_sql_type("") == ("", "", False)
+
+
+class TestColumnDirectives:
+    def test_id_directive_on_primary_key(self):
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
+
+        m = ModelInfo(name="t", database="db", schema_="public", columns=[])
+        c = ColumnInfo(name="id", type="INTEGER", not_null=True, is_primary_key=True)
+        line = _column_line(m, c, rel_map={})
+        assert "@id" in line
+
+    def test_unique_directive(self):
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
+
+        m = ModelInfo(name="t", database="db", schema_="public", columns=[])
+        c = ColumnInfo(name="email", type="VARCHAR", not_null=False, unique=True)
+        line = _column_line(m, c, rel_map={})
+        assert "@unique" in line
+
+    def test_blocked_directive(self):
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
+
+        m = ModelInfo(name="t", database="db", schema_="public", columns=[])
+        c = ColumnInfo(name="secret", type="TEXT", not_null=False, is_hidden=True)
+        line = _column_line(m, c, rel_map={})
+        assert "@blocked" in line
+
+    def test_pk_column_does_not_get_unique_directive(self):
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
+
+        m = ModelInfo(name="t", database="db", schema_="public", columns=[])
+        c = ColumnInfo(
+            name="id", type="INTEGER", not_null=True, is_primary_key=True, unique=True
+        )
+        line = _column_line(m, c, rel_map={})
+        assert "@id" in line
+        assert "@unique" not in line
+
+    def test_sql_directive_preserves_size(self):
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
+
+        m = ModelInfo(name="t", database="db", schema_="public", columns=[])
+        c = ColumnInfo(name="price", type="NUMERIC(10,2)", not_null=False)
+        line = _column_line(m, c, rel_map={})
+        assert '@sql(type: "NUMERIC", size: "10,2")' in line
+
+    def test_relation_directive(self):
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
+
+        m = ModelInfo(name="orders", database="db", schema_="public", columns=[])
+        c = ColumnInfo(name="customer_id", type="INTEGER", not_null=True)
+        rel_map = {("orders", "customer_id"): ("customers", "customer_id")}
+        line = _column_line(m, c, rel_map=rel_map)
+        assert "@relation(type: customers, field: customer_id)" in line
 
 
 class TestNoRelationships:

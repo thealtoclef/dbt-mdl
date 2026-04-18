@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from dbt_mdl.dbt.artifacts import load_manifest
-from dbt_mdl.dbt.processors.lineage import (
+from dbt_graphql.dbt.artifacts import load_manifest
+from dbt_graphql.dbt.processors.lineage import (
     ColumnLineageEdge,
     extract_table_lineage,
     extract_column_lineage,
@@ -91,14 +91,14 @@ class TestColumnLineage:
 
 class TestConvertResultLineage:
     def test_convert_result_has_lineage(self):
-        from dbt_mdl import extract_project
+        from dbt_graphql import extract_project
 
         project = extract_project(CATALOG, MANIFEST)
         lineage = project.build_lineage_schema()
         assert lineage is not None
 
     def test_lineage_schema_serialization(self):
-        from dbt_mdl import extract_project
+        from dbt_graphql import extract_project
 
         project = extract_project(CATALOG, MANIFEST)
         lineage = project.build_lineage_schema()

@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from dbt_mdl.dbt.artifacts import load_manifest
-from dbt_mdl.dbt.processors.tests_preprocessor import (
+from dbt_graphql.dbt.artifacts import load_manifest
+from dbt_graphql.dbt.processors.tests_preprocessor import (
     preprocess_tests,
     _sanitize_enum_name,
 )

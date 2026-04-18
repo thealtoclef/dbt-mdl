@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from ...wren.models import Relationship, JoinType
+from ...ir.models import ProcessorRelationship, JoinType
 
 
 @dataclass
@@ -18,7 +18,7 @@ class ConstraintsResult:
     # unique_id → primary key column name
     primary_keys: dict[str, str] = field(default_factory=dict)
     # List of FK relationships extracted from foreign_key constraints
-    foreign_key_relationships: list[Relationship] = field(default_factory=list)
+    foreign_key_relationships: list[ProcessorRelationship] = field(default_factory=list)
 
 
 def _model_name_from_unique_id(unique_id: str) -> str:
@@ -41,8 +41,8 @@ def _parse_fk_expression(expression: str) -> tuple[str, str] | None:
     table_ref, col = match.group(1), match.group(2)
     # Extract just the table name (last part before the paren)
     parts = table_ref.strip().split(".")
-    table_name = parts[-1].strip('"').strip("`")
-    return table_name, col.strip('"').strip("`")
+    table_name = parts[-1].strip().strip('"').strip("`")
+    return table_name, col.strip().strip('"').strip("`")
 
 
 def extract_constraints(manifest) -> ConstraintsResult:
@@ -110,7 +110,7 @@ def extract_constraints(manifest) -> ConstraintsResult:
                         if dedup_key not in seen_fk:
                             seen_fk.add(dedup_key)
                             result.foreign_key_relationships.append(
-                                Relationship(
+                                ProcessorRelationship(
                                     name=rel_name,
                                     models=[from_model, to_table],
                                     join_type=JoinType.many_to_one,
@@ -158,7 +158,7 @@ def extract_constraints(manifest) -> ConstraintsResult:
                                 if dedup_key not in seen_fk:
                                     seen_fk.add(dedup_key)
                                     result.foreign_key_relationships.append(
-                                        Relationship(
+                                        ProcessorRelationship(
                                             name=rel_name,
                                             models=[from_model, to_table],
                                             join_type=JoinType.many_to_one,

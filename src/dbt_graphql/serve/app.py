@@ -2,7 +2,7 @@
 
 Usage::
 
-    from dbt_mdl.graphql import create_app, serve
+    from dbt_mdl.serve.app import create_app, serve
 
     app = create_app(db_graphql_path="db.graphql", db_url="mysql+aiomysql://...")
     # or with config dict:
@@ -21,9 +21,44 @@ from ariadne import make_executable_schema
 from ariadne.asgi import GraphQL
 from fastapi import FastAPI
 
-from .connection import DatabaseManager
+from ..compiler.connection import DatabaseManager
+from ..formatter.schema import TableRegistry, load_db_graphql
 from .resolvers import create_query_type
-from .schema import load_db_graphql
+
+_STANDARD_GQL_SCALARS = {"String", "Int", "Float", "Boolean", "ID"}
+
+
+def _build_ariadne_sdl(registry: TableRegistry) -> str:
+    """Build a standard GraphQL SDL (without db.graphql custom directives) for Ariadne.
+
+    The db.graphql format uses custom directives (@sql, @database, @relation, etc.)
+    that Ariadne's schema builder doesn't understand. This function builds a clean
+    SDL with custom types declared as scalars and a Query type for all tables.
+    """
+    custom_scalars: set[str] = set()
+    type_blocks: list[str] = []
+
+    for table_def in registry:
+        lines = [f"type {table_def.name} {{"]
+        for col in table_def.columns:
+            type_name = col.gql_type
+            if type_name and type_name not in _STANDARD_GQL_SCALARS:
+                custom_scalars.add(type_name)
+            wrapped = f"[{type_name}]" if col.is_array else type_name
+            if col.not_null:
+                wrapped += "!"
+            lines.append(f"  {col.name}: {wrapped}")
+        lines.append("}")
+        type_blocks.append("\n".join(lines))
+
+    query_fields = [
+        f"  {t.name}(limit: Int, offset: Int): [{t.name}]" for t in registry
+    ]
+    query_block = "type Query {\n" + "\n".join(query_fields) + "\n}"
+
+    scalar_defs = [f"scalar {s}" for s in sorted(custom_scalars)]
+    parts = scalar_defs + type_blocks + [query_block]
+    return "\n\n".join(parts) + "\n"
 
 
 def create_app(
@@ -32,25 +67,12 @@ def create_app(
     db_url: str | None = None,
     config: dict[str, Any] | None = None,
 ) -> FastAPI:
-    """Build a FastAPI app with Ariadne GraphQL mounted at ``/graphql``.
-
-    Parameters
-    ----------
-    db_graphql_path:
-        Path to the ``db.graphql`` SDL file.
-    db_url:
-        SQLAlchemy async connection URL (e.g. ``mysql+aiomysql://...``).
-    config:
-        Alternative: a dict with ``type``, ``host``, ``port``, etc.
-        Passed to ``DatabaseManager`` which builds the URL.
-    """
+    """Build a FastAPI app with Ariadne GraphQL mounted at ``/graphql``."""
     schema_info, registry = load_db_graphql(db_graphql_path)
     db = DatabaseManager(db_url=db_url, config=config)
 
     query_type = create_query_type(registry)
-
-    sdl = Path(db_graphql_path).read_text()
-    gql_schema = make_executable_schema(sdl, query_type)
+    gql_schema = make_executable_schema(_build_ariadne_sdl(registry), query_type)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -62,7 +84,7 @@ def create_app(
 
     graphql_app = GraphQL(
         gql_schema,
-        context_value=lambda req: {
+        context_value=lambda req, _data=None: {
             "request": req,
             "registry": registry,
             "db": db,

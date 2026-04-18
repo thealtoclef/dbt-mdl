@@ -15,10 +15,10 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-from dbt_mdl.graphql.compiler import compile_query
-from dbt_mdl.graphql.schema import TableRegistry, parse_db_graphql
-from dbt_mdl.graphql.formatter import format_graphql
-from dbt_mdl.pipeline import extract_project
+from dbt_graphql.compiler.query import compile_query
+from dbt_graphql.formatter.schema import TableRegistry, parse_db_graphql
+from dbt_graphql.formatter.graphql import format_graphql
+from dbt_graphql.pipeline import extract_project
 
 
 # ---------------------------------------------------------------------------

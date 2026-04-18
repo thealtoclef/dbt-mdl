@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...wren.models import Relationship, JoinType
+from ...ir.models import ProcessorRelationship, JoinType
 
 
 def _model_name_from_unique_id(unique_id: str) -> str:
@@ -9,7 +9,7 @@ def _model_name_from_unique_id(unique_id: str) -> str:
     return parts[-1] if parts else unique_id
 
 
-def build_relationships(manifest) -> list[Relationship]:
+def build_relationships(manifest) -> list[ProcessorRelationship]:
     """
     Generate Relationship objects from 'relationships' test nodes in the manifest.
 
@@ -20,7 +20,7 @@ def build_relationships(manifest) -> list[Relationship]:
       node.test_metadata.kwargs["field"] → target column
     """
     seen: set[tuple] = set()
-    relationships: list[Relationship] = []
+    relationships: list[ProcessorRelationship] = []
 
     for unique_id, node in manifest.nodes.items():
         if not unique_id.startswith("test."):
@@ -53,7 +53,7 @@ def build_relationships(manifest) -> list[Relationship]:
         seen.add(dedup_key)
 
         relationships.append(
-            Relationship(
+            ProcessorRelationship(
                 name=rel_name,
                 models=[from_model, to_model],
                 join_type=join_type,

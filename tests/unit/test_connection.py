@@ -2,7 +2,7 @@
 
 import pytest
 
-from dbt_mdl.graphql.connection import build_db_url, DatabaseManager
+from dbt_graphql.compiler.connection import build_db_url, DatabaseManager
 
 
 class TestBuildDbUrl:
