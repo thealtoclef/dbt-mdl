@@ -3,7 +3,7 @@ name = "dbt-mdl"
 version = "0.1.0"
 description = "Convert dbt project to Modeling Definition Language"
 readme = "README.md"
-requires-python = ">=3.14,<4"
+requires-python = ">=3.13,<3.14"
 license = "MIT"
 dependencies = [
     "dbt-artifacts-parser>=0.13.0",
