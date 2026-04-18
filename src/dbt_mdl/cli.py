@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "format",
-        help="Comma-separated output formats: domain, wren, graphjin, or all.",
+        help="Comma-separated output formats: wren, graphjin, or all.",
     )
     parser.add_argument(
         "--catalog",
@@ -68,7 +68,7 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         requested = {f.strip() for f in args.format.split(",")}
-        valid = {"domain", "wren", "graphjin", "all"}
+        valid = {"wren", "graphjin", "all"}
         unknown = requested - valid
         if unknown:
             print(
@@ -79,8 +79,9 @@ def main(argv: list[str] | None = None) -> None:
 
         formats = valid - {"all"} if "all" in requested else requested
 
-        if "domain" in formats:
-            _write_domain(project, output_dir)
+        # Lineage is always generated
+        _write_lineage(project, output_dir)
+
         if "wren" in formats:
             _write_wren(project, output_dir)
         if "graphjin" in formats:
@@ -90,7 +91,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
 
-def _write_domain(project, output_dir: Path) -> None:
+def _write_lineage(project, output_dir: Path) -> None:
     lineage = project.build_lineage_schema()
     if lineage.table_lineage or lineage.column_lineage:
         lineage_path = output_dir / "lineage.json"
