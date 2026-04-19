@@ -175,10 +175,30 @@ class TestColumnDirectives:
         from dbt_graphql.formatter.graphql import _column_line
         from dbt_graphql.ir.models import ColumnInfo, ModelInfo
 
-        m = ModelInfo(name="t", database="db", schema_="public", columns=[])
-        c = ColumnInfo(name="id", type="INTEGER", not_null=True, is_primary_key=True)
+        m = ModelInfo(
+            name="t", database="db", schema_="public", columns=[], primary_keys=["id"]
+        )
+        c = ColumnInfo(name="id", type="INTEGER", not_null=True)
         line = _column_line(m, c, rel_map={})
         assert "@id" in line
+
+    def test_composite_pk_parts_do_not_get_id_directive(self):
+        from dbt_graphql.formatter.graphql import _column_line
+        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
+
+        m = ModelInfo(
+            name="t",
+            database="db",
+            schema_="public",
+            columns=[],
+            primary_keys=["order_id", "item_id"],
+        )
+        for col_name in ("order_id", "item_id"):
+            c = ColumnInfo(name=col_name, type="INTEGER", not_null=True)
+            line = _column_line(m, c, rel_map={})
+            assert "@id" not in line, (
+                f"composite PK column {col_name} should not get @id"
+            )
 
     def test_unique_directive(self):
         from dbt_graphql.formatter.graphql import _column_line
@@ -189,23 +209,14 @@ class TestColumnDirectives:
         line = _column_line(m, c, rel_map={})
         assert "@unique" in line
 
-    def test_blocked_directive(self):
-        from dbt_graphql.formatter.graphql import _column_line
-        from dbt_graphql.ir.models import ColumnInfo, ModelInfo
-
-        m = ModelInfo(name="t", database="db", schema_="public", columns=[])
-        c = ColumnInfo(name="secret", type="TEXT", not_null=False, is_hidden=True)
-        line = _column_line(m, c, rel_map={})
-        assert "@blocked" in line
-
     def test_pk_column_does_not_get_unique_directive(self):
         from dbt_graphql.formatter.graphql import _column_line
         from dbt_graphql.ir.models import ColumnInfo, ModelInfo
 
-        m = ModelInfo(name="t", database="db", schema_="public", columns=[])
-        c = ColumnInfo(
-            name="id", type="INTEGER", not_null=True, is_primary_key=True, unique=True
+        m = ModelInfo(
+            name="t", database="db", schema_="public", columns=[], primary_keys=["id"]
         )
+        c = ColumnInfo(name="id", type="INTEGER", not_null=True, unique=True)
         line = _column_line(m, c, rel_map={})
         assert "@id" in line
         assert "@unique" not in line

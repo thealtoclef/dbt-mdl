@@ -7,7 +7,6 @@ and makes real HTTP GraphQL requests to verify the full request path.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -30,10 +29,20 @@ def sqlite_db(tmp_path_factory) -> Path:
     db_path = tmp_path_factory.mktemp("serve_db") / "test.db"
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.connect() as conn:
-        conn.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"))
-        conn.execute(text("CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)"))
+        conn.execute(
+            text("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)"
+            )
+        )
         conn.execute(text("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')"))
-        conn.execute(text("INSERT INTO posts VALUES (1, 1, 'Hello'), (2, 1, 'World'), (3, 2, 'Hi')"))
+        conn.execute(
+            text(
+                "INSERT INTO posts VALUES (1, 1, 'Hello'), (2, 1, 'World'), (3, 2, 'Hi')"
+            )
+        )
         conn.commit()
     engine.dispose()
     return db_path

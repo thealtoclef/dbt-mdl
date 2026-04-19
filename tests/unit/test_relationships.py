@@ -78,3 +78,23 @@ def test_non_relationship_tests_ignored():
     for rel in rels:
         assert "not_null" not in rel.name
         assert "accepted_values" not in rel.name
+
+
+def test_join_type_is_many_to_one():
+    manifest = load_manifest(MANIFEST)
+    rels = build_relationships(manifest)
+    assert all(r.join_type == JoinType.many_to_one for r in rels)
+
+
+def test_quoted_column_names_stripped(tmp_path):
+    from dbt_artifacts_parser.parser import parse_manifest
+
+    data = json.loads(MANIFEST.read_text())
+    test_key = "test.jaffle_shop.relationships_orders_customer_id__customer_id__ref_customers_.c6ec7f58f2"
+    data["nodes"][test_key]["column_name"] = '"customer_id"'
+    data["nodes"][test_key]["test_metadata"]["kwargs"]["field"] = '"customer_id"'
+
+    m = parse_manifest(data)
+    rels = build_relationships(m)
+    assert len(rels) == 1
+    assert rels[0].condition == '"orders"."customer_id" = "customers"."customer_id"'

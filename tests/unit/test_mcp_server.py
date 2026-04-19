@@ -52,7 +52,7 @@ class TestDescribeTable:
             assert "name" in col
             assert "sql_type" in col
             assert "not_null" in col
-            assert "is_primary_key" in col
+            assert "is_unique" in col
             assert "is_unique" in col
 
     def test_missing_table_returns_error(self):
@@ -131,8 +131,9 @@ class TestExecuteQuery:
 
 class TestMcpServerRegistration:
     def test_create_server_does_not_crash(self):
-        fastmcp = pytest.importorskip("fastmcp")
+        pytest.importorskip("fastmcp")
         from dbt_graphql.mcp.server import create_mcp_server
+
         project = extract_project(CATALOG, MANIFEST)
         mcp = create_mcp_server(project)
         assert mcp is not None

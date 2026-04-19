@@ -14,7 +14,6 @@ class ColumnDetail:
     name: str
     sql_type: str
     not_null: bool = False
-    is_primary_key: bool = False
     is_unique: bool = False
     description: str = ""
     enum_values: list[str] | None = None
@@ -98,7 +97,6 @@ class SchemaDiscovery:
                 name=c.name,
                 sql_type=c.type,
                 not_null=c.not_null,
-                is_primary_key=c.is_primary_key,
                 is_unique=c.unique,
                 description=c.description,
                 enum_values=c.enum_values,

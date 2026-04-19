@@ -2,7 +2,7 @@
 
 This module implements the parsing/extraction pipeline. It produces a
 :class:`ProjectInfo` which is then consumed by formatters to produce
-format-specific output (MDL, GraphJin, etc.).
+format-specific output.
 """
 
 from __future__ import annotations
@@ -80,10 +80,12 @@ def extract_project(
         catalog_columns: dict = catalog_node.columns or {}
         manifest_columns: dict = getattr(manifest_node, "columns", {})
 
-        pk_col = constraints_result.primary_keys.get(key)
+        pk_cols: list[str] = constraints_result.primary_keys.get(key, [])
 
         columns: list[ColumnInfo] = []
-        for col_name, col_meta in catalog_columns.items():
+        for raw_col_name, col_meta in catalog_columns.items():
+            # Strip SQL quoting characters that some adapters emit in the catalog
+            col_name = raw_col_name.strip('"').strip("`")
             col_key = f"{key}.{col_name}"
             raw_type = col_meta.type or ""
 
@@ -107,8 +109,6 @@ def extract_project(
                     unique=unique,
                     description=description,
                     enum_values=enum_values,
-                    is_primary_key=(col_name == pk_col),
-                    is_hidden=False,
                 )
             )
 
@@ -138,7 +138,7 @@ def extract_project(
                 database=database,
                 schema_=schema,
                 columns=columns,
-                primary_key=pk_col,
+                primary_keys=pk_cols,
                 description=description,
             )
         )
@@ -148,12 +148,24 @@ def extract_project(
     seen_names: set[str] = set()
     relationships: list[RelationshipInfo] = []
 
+    # Build a set of (model_name, col_name) pairs known to be unique,
+    # from both unique tests and primary-key constraints. Used to infer cardinality.
+    unique_cols: set[tuple[str, str]] = set()
+    for col_key in tests_result.column_to_unique:
+        uid, _, col = col_key.rpartition(".")
+        unique_cols.add((uid.split(".")[-1], col))
+    for uid, pk_cols_list in constraints_result.primary_keys.items():
+        if (
+            len(pk_cols_list) == 1
+        ):  # composite PKs don't make any individual column unique
+            unique_cols.add((uid.split(".")[-1], pk_cols_list[0]))
+
     for rel in constraints_result.foreign_key_relationships:
-        relationships.append(_wren_rel_to_domain(rel))
+        relationships.append(_rel_to_domain(rel, unique_cols))
         seen_names.add(rel.name)
     for rel in test_relationships:
         if rel.name not in seen_names:
-            relationships.append(_wren_rel_to_domain(rel))
+            relationships.append(_rel_to_domain(rel, unique_cols))
 
     # 8. Attach relationships to models
     model_by_name: dict[str, ModelInfo] = {m.name: m for m in models}
@@ -205,8 +217,35 @@ def extract_project(
     )
 
 
-def _wren_rel_to_domain(rel: Any) -> RelationshipInfo:
-    """Convert a Wren Relationship object to domain RelationshipInfo."""
+def _infer_join_type(
+    from_model: str,
+    from_col: str,
+    to_model: str,
+    to_col: str,
+    unique_cols: set[tuple[str, str]],
+) -> str:
+    """Infer cardinality from known-unique columns on each side of the relationship.
+
+    A column is "unique" if it has a dbt unique test or is declared as a primary key.
+    When uniqueness is unknown on both sides we fall back to many_to_one, which is the
+    correct assumption for a dbt relationships test (the "to" side is always referenced
+    as a lookup key, implying it should be unique even if we lack the test to prove it).
+    """
+    from_unique = (from_model, from_col) in unique_cols
+    to_unique = (to_model, to_col) in unique_cols
+    if from_unique and to_unique:
+        return "one_to_one"
+    if from_unique:
+        return "one_to_many"
+    if to_unique:
+        return "many_to_one"
+    return "many_to_one"  # fallback: assume standard FK pattern
+
+
+def _rel_to_domain(
+    rel: Any, unique_cols: set[tuple[str, str]] | None = None
+) -> RelationshipInfo:
+    """Convert a ProcessorRelationship to domain RelationshipInfo."""
     from_col = ""
     to_col = ""
     if hasattr(rel, "condition") and rel.condition:
@@ -215,11 +254,21 @@ def _wren_rel_to_domain(rel: Any) -> RelationshipInfo:
             from_col = match.group(2)
             to_col = match.group(4)
 
+    from_model = rel.models[0]
+    to_model = rel.models[1]
+
+    if unique_cols and from_col and to_col:
+        join_type = _infer_join_type(
+            from_model, from_col, to_model, to_col, unique_cols
+        )
+    else:
+        join_type = str(rel.join_type)
+
     return RelationshipInfo(
         name=rel.name,
-        from_model=rel.models[0],
+        from_model=from_model,
         from_column=from_col,
-        to_model=rel.models[1],
+        to_model=to_model,
         to_column=to_col,
-        join_type=str(rel.join_type),
+        join_type=join_type,
     )

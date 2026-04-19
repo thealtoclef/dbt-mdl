@@ -51,7 +51,6 @@ class McpTools:
                     "name": c.name,
                     "sql_type": c.sql_type,
                     "not_null": c.not_null,
-                    "is_primary_key": c.is_primary_key,
                     "is_unique": c.is_unique,
                     "description": c.description,
                     "enum_values": c.enum_values,
@@ -98,7 +97,9 @@ class McpTools:
                 for p in paths
             ],
             "_meta": {
-                "next_steps": ["Use build_query to construct a query using these joins."]
+                "next_steps": [
+                    "Use build_query to construct a query using these joins."
+                ]
             },
         }
 

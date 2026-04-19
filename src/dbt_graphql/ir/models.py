@@ -1,7 +1,7 @@
 """Intermediate representation: format-agnostic domain models.
 
 These Pydantic models decouple dbt artifact parsing from any specific output
-format (MDL, GraphJin, etc.). Processors populate these types, and formatters
+format. Processors populate these types, and formatters
 consume them to produce format-specific output.
 """
 
@@ -52,13 +52,11 @@ class EnumDefinition:
 
 class ColumnInfo(BaseModel):
     name: str
-    type: str = ""  # raw DB type from catalog.json (e.g. "INTEGER", "VARCHAR(255)")
+    type: str  # raw DB type from catalog.json (e.g. "INTEGER", "VARCHAR(255)")
     not_null: bool = False
     unique: bool = False
     description: str = ""
     enum_values: list[str] | None = None
-    is_primary_key: bool = False
-    is_hidden: bool = False
 
 
 class RelationshipInfo(BaseModel):
@@ -82,7 +80,7 @@ class ModelInfo(BaseModel):
     database: str
     schema_: str = Field(alias="schema")
     columns: list[ColumnInfo] = Field(default_factory=list)
-    primary_key: str | None = None
+    primary_keys: list[str] = Field(default_factory=list)
     description: str = ""
     relationships: list[RelationshipInfo] = Field(default_factory=list)
 

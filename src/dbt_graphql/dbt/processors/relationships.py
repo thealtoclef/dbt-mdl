@@ -9,6 +9,11 @@ def _model_name_from_unique_id(unique_id: str) -> str:
     return parts[-1] if parts else unique_id
 
 
+def _clean_col(raw: str) -> str:
+    """Strip SQL quoting characters from a column name."""
+    return raw.strip('"').strip("`")
+
+
 def build_relationships(manifest) -> list[ProcessorRelationship]:
     """
     Generate Relationship objects from 'relationships' test nodes in the manifest.
@@ -32,22 +37,21 @@ def build_relationships(manifest) -> list[ProcessorRelationship]:
 
         attached_node = getattr(node, "attached_node", None) or ""
         from_model = _model_name_from_unique_id(attached_node)
-        from_col = getattr(node, "column_name", None) or ""
+        from_col = _clean_col(getattr(node, "column_name", None) or "")
 
         refs = getattr(node, "refs", None) or []
         if not refs:
             continue
         to_model = refs[0].name
 
-        to_col = (test_metadata.kwargs or {}).get("field", "")
+        to_col = _clean_col((test_metadata.kwargs or {}).get("field", ""))
         if not to_col or not from_col or not from_model or not to_model:
             continue
 
         rel_name = f"{from_model}_{from_col}_{to_model}_{to_col}"
         condition = f'"{from_model}"."{from_col}" = "{to_model}"."{to_col}"'
-        join_type = JoinType.many_to_one
 
-        dedup_key = (rel_name, join_type, condition)
+        dedup_key = (rel_name, condition)
         if dedup_key in seen:
             continue
         seen.add(dedup_key)
@@ -56,7 +60,7 @@ def build_relationships(manifest) -> list[ProcessorRelationship]:
             ProcessorRelationship(
                 name=rel_name,
                 models=[from_model, to_model],
-                join_type=join_type,
+                join_type=JoinType.many_to_one,
                 condition=condition,
             )
         )

@@ -41,7 +41,6 @@ class ColumnDef:
     not_null: bool = False
     is_pk: bool = False
     is_unique: bool = False
-    is_hidden: bool = False
     sql_type: str = ""  # raw SQL type from @sql directive
     sql_size: str = ""  # size/precision from @sql directive
     relation: RelationDef | None = None
@@ -136,8 +135,6 @@ def _parse_column(field_node: FieldDefinitionNode) -> ColumnDef:
             col.is_pk = True
         elif dname == "unique":
             col.is_unique = True
-        elif dname == "blocked":
-            col.is_hidden = True
         elif dname == "sql":
             args = _directive_args(directive)
             col.sql_type = args.get("type", "")

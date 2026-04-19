@@ -1,4 +1,4 @@
-"""Tests for extract_project pipeline and _wren_rel_to_domain helper."""
+"""Tests for extract_project pipeline and _rel_to_domain helper."""
 
 import json
 from pathlib import Path
@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from dbt_graphql.pipeline import _wren_rel_to_domain, extract_project
-from dbt_graphql.ir.models import JoinType, ProcessorRelationship, RelationshipInfo
+from dbt_graphql.pipeline import _rel_to_domain, extract_project
+from dbt_graphql.ir.models import JoinType, RelationshipInfo
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "dbt-artifacts"
 CATALOG = FIXTURES / "catalog.json"
@@ -15,7 +15,7 @@ MANIFEST = FIXTURES / "manifest.json"
 
 
 # ---------------------------------------------------------------------------
-# _wren_rel_to_domain
+# _rel_to_domain
 # ---------------------------------------------------------------------------
 
 
@@ -28,7 +28,7 @@ def _rel(name, models, join_type, condition=""):
     )
 
 
-class TestWrenRelToDomain:
+class TestRelToDomain:
     def test_basic_conversion(self):
         rel = _rel(
             name="orders_customers",
@@ -36,7 +36,7 @@ class TestWrenRelToDomain:
             join_type=JoinType.many_to_one,
             condition='"orders"."customer_id" = "customers"."customer_id"',
         )
-        result = _wren_rel_to_domain(rel)
+        result = _rel_to_domain(rel)
         assert isinstance(result, RelationshipInfo)
         assert result.name == "orders_customers"
         assert result.from_model == "orders"
@@ -52,7 +52,7 @@ class TestWrenRelToDomain:
             join_type=JoinType.many_to_one,
             condition='"line_items"."order_ref" = "orders"."order_id"',
         )
-        result = _wren_rel_to_domain(rel)
+        result = _rel_to_domain(rel)
         assert result.from_column == "order_ref"
         assert result.to_column == "order_id"
 
@@ -63,7 +63,7 @@ class TestWrenRelToDomain:
             join_type=JoinType.many_to_one,
             condition="",
         )
-        result = _wren_rel_to_domain(rel)
+        result = _rel_to_domain(rel)
         assert result.from_column == ""
         assert result.to_column == ""
 
@@ -73,14 +73,14 @@ class TestWrenRelToDomain:
             models=["a", "b"],
             join_type=JoinType.many_to_one,
         )
-        result = _wren_rel_to_domain(rel)
+        result = _rel_to_domain(rel)
         assert result.from_column == ""
         assert result.to_column == ""
 
     def test_join_type_string(self):
         for jt in JoinType:
             rel = _rel("x_y", ["x", "y"], jt)
-            result = _wren_rel_to_domain(rel)
+            result = _rel_to_domain(rel)
             assert result.join_type == str(jt)
 
     def test_malformed_condition_yields_empty_columns(self):
@@ -90,7 +90,7 @@ class TestWrenRelToDomain:
             join_type=JoinType.many_to_one,
             condition="a.id = b.ref",  # no quotes → regex doesn't match
         )
-        result = _wren_rel_to_domain(rel)
+        result = _rel_to_domain(rel)
         assert result.from_column == ""
         assert result.to_column == ""
 
@@ -166,6 +166,86 @@ class TestExtractProjectOutput:
         assert project.adapter_type != ""
 
 
+class TestCardinalityInference:
+    def test_many_to_one_when_to_col_is_unique(self):
+        # customers.customer_id has a unique test in the fixture → to_unique=True
+        # orders.customer_id has no unique test → from_unique=False
+        # → many_to_one
+        project = extract_project(CATALOG, MANIFEST)
+        rel = next(
+            r
+            for r in project.relationships
+            if r.from_model == "orders" and r.to_model == "customers"
+        )
+        assert rel.join_type == "many_to_one"
+
+    def test_one_to_one_when_both_cols_unique(self, tmp_path):
+        import json
+
+        data = json.loads(MANIFEST.read_text())
+
+        # Add a unique test on orders.customer_id to simulate a one-to-one FK
+        uid = "test.jaffle_shop.unique_orders_customer_id.synthetic"
+        data["nodes"][uid] = {
+            "resource_type": "test",
+            "database": "dev",
+            "schema": "main",
+            "name": "unique_orders_customer_id",
+            "unique_id": uid,
+            "package_name": "jaffle_shop",
+            "path": "x.sql",
+            "original_file_path": "x.yml",
+            "fqn": ["jaffle_shop", "unique_orders_customer_id"],
+            "alias": "unique_orders_customer_id",
+            "checksum": {"name": "sha256", "checksum": "x"},
+            "column_name": "customer_id",
+            "attached_node": "model.jaffle_shop.orders",
+            "refs": [],
+            "test_metadata": {"name": "unique", "kwargs": {}, "namespace": None},
+        }
+
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(json.dumps(data))
+
+        project = extract_project(CATALOG, manifest_path)
+        rel = next(
+            r
+            for r in project.relationships
+            if r.from_model == "orders" and r.to_model == "customers"
+        )
+        assert rel.join_type == "one_to_one"
+
+    def test_infer_join_type_function_directly(self):
+        from dbt_graphql.pipeline import _infer_join_type
+
+        unique = {("customers", "customer_id"), ("orders", "order_id")}
+
+        assert (
+            _infer_join_type(
+                "orders", "customer_id", "customers", "customer_id", unique
+            )
+            == "many_to_one"
+        )
+        assert (
+            _infer_join_type("orders", "order_id", "customers", "customer_id", unique)
+            == "one_to_one"
+        )
+        assert (
+            _infer_join_type("orders", "order_id", "line_items", "order_id", set())
+            == "many_to_one"
+        )
+        assert (
+            _infer_join_type(
+                "orders",
+                "order_id",
+                "customers",
+                "customer_id",
+                {("orders", "order_id")},
+            )
+            == "one_to_many"
+        )
+
+
 class TestConstraintVsTestPriority:
     """Constraint-defined FKs take priority over test-inferred relationships."""
 
@@ -173,7 +253,9 @@ class TestConstraintVsTestPriority:
         raw = json.loads(MANIFEST.read_text())
 
         # Inject a model-level FK constraint into the orders manifest node
-        orders_key = next(k for k in raw["nodes"] if k.startswith("model.") and k.endswith(".orders"))
+        orders_key = next(
+            k for k in raw["nodes"] if k.startswith("model.") and k.endswith(".orders")
+        )
         raw["nodes"][orders_key].setdefault("constraints", []).append(
             {
                 "type": "foreign_key",

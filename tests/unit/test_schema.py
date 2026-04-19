@@ -21,7 +21,7 @@ type orders @database(name: mydb) @schema(name: main) @table(name: orders) {
 
 type payments @database(name: mydb) @schema(name: main) @table(name: payments) {
   payment_id: Integer! @sql(type: "INTEGER")
-  secret: Text @sql(type: "TEXT") @blocked
+  secret: Text @sql(type: "TEXT")
 }
 """
 
@@ -94,11 +94,6 @@ class TestDirectives:
         info, _ = _parse()
         col = next(c for c in info.tables[0].columns if c.name == "customer_id")
         assert col.is_unique is True
-
-    def test_blocked_directive(self):
-        info, _ = _parse()
-        col = next(c for c in info.tables[2].columns if c.name == "secret")
-        assert col.is_hidden is True
 
     def test_relation_directive(self):
         info, _ = _parse()

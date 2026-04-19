@@ -110,7 +110,7 @@ def _type_block(
     model: ModelInfo,
     rel_map: dict[tuple[str, str], tuple[str, str]],
 ) -> str:
-    """Build a GraphJin SDL type block for a dbt model."""
+    """Build a GraphQL SDL type block for a dbt model."""
     type_directives: list[str] = [
         f"@database(name: {model.database})",
         f"@schema(name: {model.schema_})",
@@ -144,12 +144,11 @@ def _column_line(
     if size:
         sql_args += f', size: "{size}"'
     directives: list[str] = [f"@sql({sql_args})"]
-    if col.is_primary_key or col.name == model.primary_key:
+    is_sole_pk = len(model.primary_keys) == 1 and col.name in model.primary_keys
+    if is_sole_pk:
         directives.append("@id")
-    if col.unique and not (col.is_primary_key or col.name == model.primary_key):
+    if col.unique and not is_sole_pk:
         directives.append("@unique")
-    if col.is_hidden:
-        directives.append("@blocked")
 
     rel = rel_map.get((model.name, col.name))
     if rel:

@@ -15,8 +15,8 @@ from ...ir.models import ProcessorRelationship, JoinType
 
 @dataclass
 class ConstraintsResult:
-    # unique_id → primary key column name
-    primary_keys: dict[str, str] = field(default_factory=dict)
+    # unique_id → list of primary key column names (multiple = composite PK)
+    primary_keys: dict[str, list[str]] = field(default_factory=dict)
     # List of FK relationships extracted from foreign_key constraints
     foreign_key_relationships: list[ProcessorRelationship] = field(default_factory=list)
 
@@ -24,6 +24,28 @@ class ConstraintsResult:
 def _model_name_from_unique_id(unique_id: str) -> str:
     parts = unique_id.split(".")
     return parts[-1] if parts else unique_id
+
+
+def _resolve_to_model(to_str: str, manifest_nodes: dict) -> str | None:
+    """Resolve a fully-qualified relation name to a model name.
+
+    dbt v1.9+ model contract constraints store FK targets as a fully-qualified
+    relation name (e.g. ``"jaffle_shop"."main"."customers"``) in the ``to`` field,
+    matched against each manifest node's ``relation_name``.
+
+    Model nodes take priority over seeds and other resource types.
+    Returns the model name (last segment of the node unique_id), or None if not found.
+    """
+    if not to_str:
+        return None
+    sorted_nodes = sorted(
+        manifest_nodes.items(),
+        key=lambda x: 0 if x[0].startswith("model.") else 1,
+    )
+    for node_id, node in sorted_nodes:
+        if getattr(node, "relation_name", None) == to_str:
+            return _model_name_from_unique_id(node_id)
+    return None
 
 
 def _parse_fk_expression(expression: str) -> tuple[str, str] | None:
@@ -77,9 +99,7 @@ def extract_constraints(manifest) -> ConstraintsResult:
                     else getattr(constraint, "columns", [])
                 )
                 if columns:
-                    # Use the first column as primary key (composite PKs not supported in MDL)
-                    col_name = columns[0] if isinstance(columns[0], str) else columns[0]
-                    result.primary_keys[unique_id] = col_name
+                    result.primary_keys[unique_id] = [str(c) for c in columns]
 
             elif ctype == "foreign_key":
                 expression = (
@@ -92,31 +112,48 @@ def extract_constraints(manifest) -> ConstraintsResult:
                     if isinstance(constraint, dict)
                     else getattr(constraint, "columns", [])
                 )
+                to_str = (
+                    constraint.get("to", "")
+                    if isinstance(constraint, dict)
+                    else getattr(constraint, "to", "")
+                )
+                to_columns = (
+                    constraint.get("to_columns", [])
+                    if isinstance(constraint, dict)
+                    else getattr(constraint, "to_columns", [])
+                ) or []
+
+                to_table: str | None = None
+                to_col: str | None = None
+                from_col: str | None = None
+
                 if expression and fk_columns:
+                    # Older format: expression="customers(customer_id)", columns=["customer_id"]
                     parsed = _parse_fk_expression(expression)
                     if parsed:
                         to_table, to_col = parsed
-                        from_col = (
-                            fk_columns[0]
-                            if isinstance(fk_columns[0], str)
-                            else fk_columns[0]
-                        )
-                        rel_name = f"{from_model}_{from_col}_{to_table}_{to_col}"
-                        condition = (
-                            f'"{from_model}"."{from_col}" = "{to_table}"."{to_col}"'
-                        )
+                        from_col = fk_columns[0]
+                elif to_str and fk_columns and to_columns:
+                    # dbt v1.9+ format: to="db.schema.customers", to_columns=["id"], columns=["customer_id"]
+                    to_table = _resolve_to_model(to_str, manifest.nodes)
+                    to_col = to_columns[0]
+                    from_col = fk_columns[0]
 
-                        dedup_key = (rel_name, condition)
-                        if dedup_key not in seen_fk:
-                            seen_fk.add(dedup_key)
-                            result.foreign_key_relationships.append(
-                                ProcessorRelationship(
-                                    name=rel_name,
-                                    models=[from_model, to_table],
-                                    join_type=JoinType.many_to_one,
-                                    condition=condition,
-                                )
+                if to_table and to_col and from_col:
+                    rel_name = f"{from_model}_{from_col}_{to_table}_{to_col}"
+                    condition = f'"{from_model}"."{from_col}" = "{to_table}"."{to_col}"'
+
+                    dedup_key = (rel_name, condition)
+                    if dedup_key not in seen_fk:
+                        seen_fk.add(dedup_key)
+                        result.foreign_key_relationships.append(
+                            ProcessorRelationship(
+                                name=rel_name,
+                                models=[from_model, to_table],
+                                join_type=JoinType.many_to_one,
+                                condition=condition,
                             )
+                        )
 
         # --- Column-level constraints ---
         node_columns = getattr(node, "columns", None) or {}
@@ -135,9 +172,9 @@ def extract_constraints(manifest) -> ConstraintsResult:
                     )
 
                     if ctype == "primary_key":
-                        # Column-level primary_key constraint
-                        if unique_id not in result.primary_keys:
-                            result.primary_keys[unique_id] = col_name
+                        result.primary_keys.setdefault(unique_id, [])
+                        if col_name not in result.primary_keys[unique_id]:
+                            result.primary_keys[unique_id].append(col_name)
 
                     elif ctype == "foreign_key":
                         expression = (
@@ -145,25 +182,46 @@ def extract_constraints(manifest) -> ConstraintsResult:
                             if isinstance(constraint, dict)
                             else getattr(constraint, "expression", "")
                         )
+                        to_str = (
+                            constraint.get("to", "")
+                            if isinstance(constraint, dict)
+                            else getattr(constraint, "to", "")
+                        )
+                        to_columns = (
+                            constraint.get("to_columns", [])
+                            if isinstance(constraint, dict)
+                            else getattr(constraint, "to_columns", [])
+                        ) or []
+
+                        to_table = None
+                        to_col = None
+
                         if expression:
+                            # Older format: expression="customers(customer_id)"
                             parsed = _parse_fk_expression(expression)
                             if parsed:
                                 to_table, to_col = parsed
-                                rel_name = (
-                                    f"{from_model}_{col_name}_{to_table}_{to_col}"
-                                )
-                                condition = f'"{from_model}"."{col_name}" = "{to_table}"."{to_col}"'
+                        elif to_str and to_columns:
+                            # dbt v1.9+ format: to="db.schema.customers", to_columns=["id"]
+                            to_table = _resolve_to_model(to_str, manifest.nodes)
+                            to_col = to_columns[0]
 
-                                dedup_key = (rel_name, condition)
-                                if dedup_key not in seen_fk:
-                                    seen_fk.add(dedup_key)
-                                    result.foreign_key_relationships.append(
-                                        ProcessorRelationship(
-                                            name=rel_name,
-                                            models=[from_model, to_table],
-                                            join_type=JoinType.many_to_one,
-                                            condition=condition,
-                                        )
+                        if to_table and to_col:
+                            rel_name = f"{from_model}_{col_name}_{to_table}_{to_col}"
+                            condition = (
+                                f'"{from_model}"."{col_name}" = "{to_table}"."{to_col}"'
+                            )
+
+                            dedup_key = (rel_name, condition)
+                            if dedup_key not in seen_fk:
+                                seen_fk.add(dedup_key)
+                                result.foreign_key_relationships.append(
+                                    ProcessorRelationship(
+                                        name=rel_name,
+                                        models=[from_model, to_table],
+                                        join_type=JoinType.many_to_one,
+                                        condition=condition,
                                     )
+                                )
 
     return result
